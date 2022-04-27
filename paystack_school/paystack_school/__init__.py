@@ -6,7 +6,7 @@ __version__ = '0.0.4'
 import frappe
 from frappe.website.doctype.web_form import web_form
 from erpnext.education.doctype.fees import fees
-from frappe_paystack.overrides import (create_payment_entry, make_gl_entries,on_submit,
+from paystack_school.overrides import (create_payment_entry, make_gl_entries,on_submit,
     get_payment_gateway_url,get_payment_entry, set_missing_values,get_payment_url,
     validate_reference_documents,get_outstanding_on_journal_entry,get_party_details)
 from erpnext.accounts.doctype.payment_entry import payment_entry
