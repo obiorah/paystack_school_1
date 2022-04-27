@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include paystack_school *.css
+recursive-include paystack_school *.csv
+recursive-include paystack_school *.html
+recursive-include paystack_school *.ico
+recursive-include paystack_school *.js
+recursive-include paystack_school *.json
+recursive-include paystack_school *.md
+recursive-include paystack_school *.png
+recursive-include paystack_school *.py
+recursive-include paystack_school *.svg
+recursive-include paystack_school *.txt
+recursive-exclude paystack_school *.pyc
