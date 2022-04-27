@@ -57,7 +57,7 @@ app_license = "MIT"
 # ------------
 
 # before_install = "paystack_school.install.before_install"
-# after_install = "paystack_school.install.after_install"
+after_install = "paystack_school.install.after_install"
 
 # Uninstallation
 # ------------
