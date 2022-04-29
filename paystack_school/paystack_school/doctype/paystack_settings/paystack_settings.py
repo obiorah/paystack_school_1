@@ -52,6 +52,11 @@ class PaystackSettings(Document):
 		integration_request = create_request_log(kwargs, "Host", "Paystack")
 		kwargs.update(dict(order_id=integration_request.name))
 		# get fees
+		frappe.log_error(kwargs,'kwargs')
+		if isinstance(kwargs.get('payer_name'),bytes):
+			kwargs['payer_name'] = kwargs.get('payer_name').decode()
+			if frappe.session.user == 'Administrator':
+				kwargs['payer_email'] = 'admin@example.com'
 		
 		integration_request.db_set('customer_email',kwargs.get('payer_email'))
 		integration_request.db_set('customer_name',kwargs.get('payer_name'))
@@ -115,7 +120,7 @@ def get_paystack_fee(amount=0.0,doc=None):
 		paystack_fee = fees_limit
 	
 	
-	balance = flt((amount + paystack_fee) - amount)
+	balance = flt((amount + paystack_fee) - paystack_fee,2)
 	total_amount = amount + paystack_fee
 	customer_fee = paystack_fee #customer fee will always be equal to fee for now, until custom or fractional fees are added as options
 	

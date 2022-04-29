@@ -180,7 +180,9 @@ def get_payment_data(payment_id):
             try:
                 integration_reference_doc = frappe.get_doc(data.get('reference_doctype'),data.get('reference_docname'))
                 reference_doc = frappe.get_doc(integration_reference_doc.party_type,integration_reference_doc.party)
-                payer_name = reference_doc.title
+                payer_name = reference_doc.get('title')
+                if not payer_name:
+                    payer_name = reference_doc.get('customer_name') #orders from shopping cart
                 data['payer_name'] = payer_name
             except:
                 frappe.log_error(frappe.get_traceback(),'traceback')

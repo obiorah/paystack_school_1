@@ -172,7 +172,7 @@ Vue.createApp({
                       footer: 'Redirecting...'
                     })
                     setTimeout(function(){
-                      window.location.pathname = '/online-admission-form';
+                      window.location.pathname = '/home';
                      
                       // alert("Hello");
                     }, 3000);

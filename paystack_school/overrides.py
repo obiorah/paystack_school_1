@@ -330,23 +330,26 @@ def get_payment_entry(dt, dn, party_amount=None, bank_account=None, bank_amount=
 
 
 def get_party_type(dt,doc):
-    fee_document_type = doc.fee_document_type
-    if dt in ("Sales Invoice", "Sales Order", "Dunning"):
-        party_type = "Customer"
-    elif dt in ("Purchase Invoice", "Purchase Order"):
-        party_type = "Supplier"
-    elif fee_document_type == 'Student Applicant':
-        party_type = "Student Applicant"
-    elif fee_document_type == 'Student Applicant':
-        party_type = "Student"
-    elif dt in ("Expense Claim", "Employee Advance", "Gratuity"):
-        party_type = "Employee"
-    elif dt == "Fees":
-        party_type = "Student"
-    elif dt == "Donation":
-        party_type = "Donor"
-    
-    return party_type
+	try:
+		fee_document_type = doc.fee_document_type
+	except:
+		pass
+	if dt in ("Sales Invoice", "Sales Order", "Dunning"):
+		party_type = "Customer"
+	elif dt in ("Purchase Invoice", "Purchase Order"):
+		party_type = "Supplier"
+	elif fee_document_type == 'Student Applicant':
+		party_type = "Student Applicant"
+	elif fee_document_type == 'Student Applicant':
+		party_type = "Student"
+	elif dt in ("Expense Claim", "Employee Advance", "Gratuity"):
+		party_type = "Employee"
+	elif dt == "Fees":
+		party_type = "Student"
+	elif dt == "Donation":
+		party_type = "Donor"
+
+	return party_type
 
 
 def set_party_account(dt, dn, doc, party_type):
@@ -713,7 +716,10 @@ def set_missing_values(self):
 
 
 def validate_reference_documents(self):
-	if self.party_type == "Student" or "Student Applicant":
+	
+	if self.party_type == "Student":
+		valid_reference_doctypes = "Fees"
+	if self.party_type == "Student Applicant":
 		valid_reference_doctypes = "Fees"
 	elif self.party_type == "Customer":
 		valid_reference_doctypes = ("Sales Order", "Sales Invoice", "Journal Entry", "Dunning")
@@ -729,6 +735,7 @@ def validate_reference_documents(self):
 	for d in self.get("references"):
 		if not d.allocated_amount:
 			continue
+		
 		if d.reference_doctype not in valid_reference_doctypes:
 			frappe.throw(
 				_("Reference Doctype must be one of {0}").format(comma_or(valid_reference_doctypes))
