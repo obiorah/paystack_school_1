@@ -90,6 +90,7 @@ Vue.createApp({
           'payment_id':payment_id
         },
         callback:(r)=>{
+          
           if(r.message){
               this.customer = r.message.payer_name,
               this.payment_id = payment_id
@@ -125,7 +126,6 @@ Vue.createApp({
           } else {
             ///start paystack pop up
             res = r.message
-            console.log(res)
             let href = `/orders/${res.metadata.reference_name}`
             let handler = PaystackPop.setup({
               key: res.key,

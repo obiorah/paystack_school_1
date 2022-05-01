@@ -9,6 +9,7 @@ from frappe import _
 def get_payment_request(**kwargs):
     # get or create payment request data
     try:
+        frappe.log_error(kwargs,'get_payment_request')
         data = frappe.form_dict
         payment_request = None
         fees = None
@@ -61,7 +62,7 @@ def get_payment_request(**kwargs):
             payment_keys = frappe.get_doc("Paystack Settings", payment_request.payment_gateway)
             return dict(
                 key= payment_keys.live_public_key,
-    		    email= payment_request.email_to,
+    		    email= data.payer_email,
     		    amount= float(kwargs.get('total_amount')) * 100,
     		    ref= payment_request.name,
     		    currency= payment_request.currency,
@@ -118,6 +119,8 @@ def verify_transaction(payload):
                     integration_request = frappe.get_doc("Integration Request", integration_request_query)
                     payment_request.run_method("on_payment_authorized", 'Completed')
                     integration_request.db_set('status', 'Authorized')
+                    #update integration reference_doc
+                    update_integration_request_reference_doc(integration_request)
                     integration_request.db_set('error',json.dumps(resjson,indent=4))
                     # create log
                     create_log(resjson)
@@ -131,7 +134,7 @@ def verify_transaction(payload):
         return 'verification failed'
     #
     except Exception as e:
-        frappe.log_error(frappe.get_traceback(), 'Paystack Payment')
+        frappe.log_error(frappe.get_traceback(), 'Paystack Payment Verification Failure')
         return False
 
 def create_log(resjson):
@@ -204,7 +207,6 @@ def create_fees(data={}):
     # this is assuming the ref doc is student applicant
     try:
         # if doctype is student applicant
-        frappe.log_error(data,'data')
         company = frappe.db.get_value(data.reference_doctype,data.reference_docname,'company')
     except:
         # if doctype is student
@@ -251,3 +253,23 @@ def create_fees(data={}):
 
 
     return fees
+
+
+def update_integration_request_reference_doc(integration_request):
+    """update the linked reference document
+        linked document currently can only be one of [Student Applicant,Student',Sales Order(for payment made via store)]
+    """
+
+    try:
+        reference_doc = frappe.get_doc(integration_request.reference_doctype,integration_request.reference_docname)
+        if integration_request.status == 'Authorized' and integration_request.reference_doctype == 'Student Applicant':
+            if reference_doc.application_status == 'Admitted':return
+            reference_doc.paid = 1
+            reference_doc.docstatus = 1
+            reference_doc.flags.ignore_mandatory = True
+            reference_doc.submit()
+    except Exception as e:
+        print(e)
+        
+            
+        

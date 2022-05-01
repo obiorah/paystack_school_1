@@ -49,15 +49,15 @@ class PaystackSettings(Document):
 		# create unique order id by making it equal to the integration request
 		fees = get_paystack_fee(kwargs['amount'],doc=self)
 		kwargs.update(fees)
+		if isinstance(kwargs.get('payer_name'),bytes):
+			kwargs['payer_name'] = kwargs.get('payer_name').decode()
+		if frappe.session.user == 'Administrator' and isinstance(kwargs.get('payer_name'),bytes):
+			kwargs['payer_email'] = 'admin@example.com'
 		integration_request = create_request_log(kwargs, "Host", "Paystack")
 		kwargs.update(dict(order_id=integration_request.name))
 		# get fees
-		frappe.log_error(kwargs,'kwargs')
-		if isinstance(kwargs.get('payer_name'),bytes):
-			kwargs['payer_name'] = kwargs.get('payer_name').decode()
-			if frappe.session.user == 'Administrator':
-				kwargs['payer_email'] = 'admin@example.com'
 		
+		frappe.log_error(kwargs,'kwargs')
 		integration_request.db_set('customer_email',kwargs.get('payer_email'))
 		integration_request.db_set('customer_name',kwargs.get('payer_name'))
 		integration_request.db_set('total_amount',kwargs.get('total_amount'))

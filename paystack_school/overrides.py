@@ -88,49 +88,58 @@ from erpnext.accounts.doctype.payment_entry.payment_entry import (
 )
 
 def get_payment_gateway_url(self, doc):
-    if self.accept_payment:
-        controller = get_payment_gateway_controller(self.payment_gateway)
+	if self.accept_payment:
+		controller = get_payment_gateway_controller(self.payment_gateway)
 
-        title = "Payment for {0} {1}".format(doc.doctype, doc.name)
-        name = doc.name
-        amount = self.amount
-        if frappe.session.user == "Guest" or "Administrator":
-            email = doc.student_email_id
-        else:
-            email = frappe.session.user
-        fullname = doc.first_name + ' ' + doc.middle_name + ' ' + doc.last_name
-        if not doc.middle_name and doc.last_name:
-            fullname = doc.first_name
-        if self.amount_based_on_field:
-            amount = doc.get(self.amount_field)
+		title = "Payment for {0} {1}".format(doc.doctype, doc.name)
+		name = doc.name
+		amount = self.amount
+		if frappe.session.user == "Guest" or "Administrator":
+			email = doc.student_email_id or doc.student_email
+			
+		else:
+			email = frappe.session.user
+		
+		if not doc.middle_name:
+			doc.middle_name = ''
+		if not doc.last_name:
+			doc.last_name = ''
+		if not doc.middle_name and doc.last_name:
+			fullname = doc.first_name
+		else:
+			fullname = doc.first_name + ' ' + doc.middle_name + ' ' + doc.last_name
 
-        from decimal import Decimal
-        if amount is None or Decimal(amount) <= 0:
-            return frappe.utils.get_url(self.success_url or self.route)
+		if self.amount_based_on_field:
+			amount = doc.get(self.amount_field)
 
-        reference_doctype = "Web Form"
-        reference_docname = self.name
-        # get_doctype for the web_form
-        if self.doc_type == "Student Applicant":
-            # create a fees scheudle for the student, which will be used as reference in the integration request
-            reference_doctype = self.doc_type
-            reference_docname = doc.name
-        payment_details = {
-            "amount": amount,
-            "title": title,
-            "description": title,
-            "docname":name,
-            "reference_doctype": reference_doctype,
-            "reference_docname": reference_docname,
-            "payer_email": email,
-            "payer_name": fullname,
-            "order_id": doc.name,
-            "currency": self.currency,
-            "redirect_to": frappe.utils.get_url(self.success_url or self.route)
-        }
+		from decimal import Decimal
+		if amount is None or Decimal(amount) <= 0:
+			return frappe.utils.get_url(self.success_url or self.route)
 
-        # Redirect the user to this url
-        return controller.get_payment_url(**payment_details)
+
+		reference_doctype = "Web Form"
+		reference_docname = self.name
+		# get_doctype for the web_form
+		if self.doc_type == "Student Applicant":
+			# create a fees scheudle for the student, which will be used as reference in the integration request
+			reference_doctype = self.doc_type
+			reference_docname = doc.name
+		payment_details = {
+			"amount": amount,
+			"title": title,
+			"description": title,
+			"docname":name,
+			"reference_doctype": reference_doctype,
+			"reference_docname": reference_docname,
+			"payer_email": email,
+			"payer_name": fullname,
+			"order_id": doc.name,
+			"currency": self.currency,
+			"redirect_to": frappe.utils.get_url(self.success_url or self.route)
+		}
+		
+		# Redirect the user to this url
+		return controller.get_payment_url(**payment_details)
 
 
 
