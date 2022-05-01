@@ -268,9 +268,10 @@ def update_integration_request_reference_doc(integration_request):
             reference_doc.paid = 1
             
             reference_doc.flags.ignore_mandatory = True
-            reference_doc.submit()
+            reference_doc.flags.ignore_permissions = True
+            reference_doc.save()
     except Exception as e:
-        print(e)
+        frappe.log_error(frappe.get_traceback(),'update_integration')
         
             
         
