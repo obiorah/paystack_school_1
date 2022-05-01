@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_copy": 1,
  "autoname": "field:reference",
  "creation": "2021-06-16 17:09:25.336813",
  "doctype": "DocType",
@@ -23,6 +24,7 @@
   "paid_at",
   "customer_email",
   "signature",
+  "paystack_fees",
   "request_data_section",
   "data"
  ],
@@ -128,11 +130,17 @@
    "in_list_view": 1,
    "label": "Order Id",
    "options": "Payment Request"
+  },
+  {
+   "fieldname": "paystack_fees",
+   "fieldtype": "Data",
+   "label": "Paystack Fees"
   }
  ],
+ "in_create": 1,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2022-03-28 21:13:56.746691",
+ "modified": "2022-05-01 12:43:30.782326",
  "modified_by": "Administrator",
  "module": "Paystack School",
  "name": "Paystack Payment Request",

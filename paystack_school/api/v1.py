@@ -150,6 +150,7 @@ def create_log(resjson):
             'paid_at' : data.get('paid_at'),
             'created_at' : data.get('created_at'),
             'currency' : data.get('currency'),
+            'paystack_fees':frappe.utils.flt(data.get('fees'))/100,
             'channel' : data.get('channel'),
             'reference_doctype' : data.get('metadata').get('reference_doctype'),
             'reference_docname' : data.get('metadata').get('reference_name'),
