@@ -156,7 +156,7 @@ def create_log(resjson):
             'gateway' : data.get('metadata').get('gateway'),
             'customer_email' : data.get('customer').get('email'),
             'signature': data.get('authorization').get('signature'),
-            'data': json.dumps(data),
+            'data': json.dumps(data,indent=4),
         }
         doc = frappe.get_doc(payload)
         doc.insert(ignore_permissions=True)
@@ -265,7 +265,7 @@ def update_integration_request_reference_doc(integration_request):
         if integration_request.status == 'Authorized' and integration_request.reference_doctype == 'Student Applicant':
             if reference_doc.application_status == 'Admitted':return
             reference_doc.paid = 1
-            reference_doc.docstatus = 1
+            
             reference_doc.flags.ignore_mandatory = True
             reference_doc.submit()
     except Exception as e:
