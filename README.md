@@ -1,6 +1,6 @@
 ## Paystack School
 
-Paystack for Schools
+Paystack Payment integration designed for Schools
 
 #### License
 
