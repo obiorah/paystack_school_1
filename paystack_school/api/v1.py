@@ -1,4 +1,6 @@
+import string
 import frappe, requests, json, hmac, math, hashlib
+from ldap3 import STRING_TYPES
 from paystack_school.utils import (
     compute_received_hash, getip, is_paystack_ip,
     generate_digest,
@@ -99,7 +101,8 @@ def webhook(**kwargs):
 @frappe.whitelist(allow_guest=True)
 def verify_transaction(payload):
     try:
-        payload = json.loads(payload)
+        if isinstance(payload,STRING_TYPES):
+            payload = json.loads(payload)
         gateway = frappe.get_doc("Paystack Settings", payload.get('gateway'))
         headers = {'Authorization': f"Bearer {gateway.get_password(fieldname='live_secret_key', raise_exception=False)}"}
         url = f"https://api.paystack.co/transaction/verify/{payload.get('reference')}"
@@ -125,12 +128,13 @@ def verify_transaction(payload):
                     # create log
                     create_log(resjson)
 
-                    return 'no_integration_request'
+                    return True
                         # integration_request.db_set('status', 'Failed')
                 else:
                     return False
             else:
-                return 'payment request not found'
+                frappe.log_error(json.dumps(resjson.get('data')),'Payment Verification Failed')
+                return
         return 'verification failed'
     #
     except Exception as e:

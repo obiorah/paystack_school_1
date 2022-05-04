@@ -9,7 +9,7 @@ import json
 import hmac
 import razorpay
 import hashlib
-from six.moves.urllib.parse import urlencode
+#from six.moves.urllib.parse import urlencode
 from frappe.utils import flt
 from frappe.model.document import Document
 from frappe.utils import get_url, call_hook_method, cint, get_timestamp
