@@ -23,6 +23,7 @@ def modify_fees_and_program_doctype():
 
 def add_party_type():
     doc = frappe.new_doc('Party Type')
+    if frappe.db.exists('Party Type','Student Applicant'):return
     doc.party_type = "Student Applicant"
     doc.account_type = "Receivable"
     doc.save()
