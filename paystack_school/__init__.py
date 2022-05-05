@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
-from erpnext.accounts.doctype.journal_entry.journal_entry import get_payment_entry
 
 __version__ = '0.0.4'
 import frappe
