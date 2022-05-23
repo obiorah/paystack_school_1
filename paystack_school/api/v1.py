@@ -6,6 +6,7 @@ from paystack_school.utils import (
     generate_digest,
 )
 from frappe import _
+from math import ceil
 
 @frappe.whitelist(allow_guest=True)
 def get_payment_request(**kwargs):
@@ -65,7 +66,7 @@ def get_payment_request(**kwargs):
             return dict(
                 key= payment_keys.live_public_key,
     		    email= data.payer_email,
-    		    amount= float(kwargs.get('total_amount')) * 100,
+    		    amount= ceil(float(kwargs.get('total_amount')) * 100),
     		    ref= payment_request.name,
     		    currency= payment_request.currency,
                 status=payment_request.status,
