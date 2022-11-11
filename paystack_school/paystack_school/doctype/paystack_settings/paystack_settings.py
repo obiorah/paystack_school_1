@@ -52,6 +52,8 @@ class PaystackSettings(Document):
 		
 		if frappe.session.user == 'Administrator' and isinstance(kwargs.get('payer_name'),bytes):
 			kwargs['payer_email'] = frappe.db.get_value('User','Administrator','email')
+		if kwargs['payer_email'] == 'Administrator' and frappe.session.user != 'Administrator':
+			kwargs['payer_email'] = frappe.session.user
 		if isinstance(kwargs.get('payer_name'),bytes):
 			kwargs['payer_name'] = kwargs.get('payer_name').decode()
 		integration_request = create_request_log(kwargs, "Host", "Paystack")
