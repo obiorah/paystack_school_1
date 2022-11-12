@@ -126,7 +126,6 @@ Vue.createApp({
           } else {
             ///start paystack pop up
             res = r.message
-	    console.log(res,'resssssssssssssssss')
             let href = `/orders/${res.metadata.reference_name}`
             let handler = PaystackPop.setup({
               key: res.key,

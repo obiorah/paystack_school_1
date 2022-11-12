@@ -12,6 +12,335 @@ from erpnext.controllers.accounts_controller import (
 	get_supplier_block_status,
 	validate_taxes_and_charges,
 )
+from frappe.utils import cint, comma_or, flt, getdate, nowdate
+from erpnext.accounts.doctype.bank_account.bank_account import (
+	get_bank_account_details,
+	get_party_bank_account,
+)
+from erpnext.accounts.doctype.invoice_discounting.invoice_discounting import (
+	get_party_account_based_on_invoice_discounting,
+)
+from erpnext.accounts.doctype.journal_entry.journal_entry import get_default_bank_cash_account
+
+from erpnext.accounts.party import get_party_account
+from erpnext.accounts.utils import get_account_currency, get_balance_on, get_outstanding_invoices
+from functools import reduce
+from erpnext.accounts.doctype.payment_entry.payment_entry import (
+	get_company_defaults,get_account_details
+)
+from erpnext.accounts.doctype.payment_entry.payment_entry import PaymentEntry
+from erpnext.accounts.doctype.payment_request.payment_request import PaymentRequest
+from frappe.website.doctype.web_form.web_form import WebForm
+from erpnext.education.doctype.fees.fees import Fees
+
+
+class CustomFees(Fees):
+    
+	
+	def on_submit(self):
+		frappe.log_error('on_submit',">>>>>>>>")
+		make_gl_entries(self)
+
+		if self.send_payment_request and self.student_email:
+			party_type = self.fee_document_type
+			pr = make_payment_request(
+				party_type=party_type,
+				party=self.student,
+				dt="Fees",
+				dn=self.name,
+				recipient_id=self.student_email,
+				submit_doc=True,
+				use_dummy_message=True,
+			)
+			frappe.msgprint(_("Payment request {0} created").format(getlink("Payment Request", pr.name)))
+		
+
+class CustomPaymentRequest(PaymentRequest):
+    
+	def get_payment_url(self):
+		super().get_payment_url()
+			# check if payment url/integration request already exists
+		integration_request = frappe.db.exists('Integration Request',{'reference_doctype':self.party_type,'reference_docname':self.party})
+		if integration_request:
+			integration_request_name = frappe.db.get_value('Integration Request',{'reference_doctype':self.party_type,'reference_docname':self.party},'name')
+			payment_url = get_url("/paystack/pay?payment_id={0}".format(integration_request_name))
+			return payment_url
+		if self.reference_doctype != "Fees":
+			data = frappe.db.get_value(
+				self.reference_doctype, self.reference_name, ["company", "customer_name"], as_dict=1
+			)
+		else:
+			data = frappe.db.get_value(
+				self.reference_doctype, self.reference_name, ["student_name"], as_dict=1
+			)
+			data.update({"company": frappe.defaults.get_defaults().company})
+
+		controller = get_payment_gateway_controller(self.payment_gateway)
+		controller.validate_transaction_currency(self.currency)
+
+		if hasattr(controller, "validate_minimum_transaction_amount"):
+			controller.validate_minimum_transaction_amount(self.currency, self.grand_total)
+
+		return controller.get_payment_url(
+			**{
+				"amount": flt(self.grand_total, self.precision("grand_total")),
+				"title": data.company.encode("utf-8"),
+				"description": self.subject.encode("utf-8"),
+				"reference_doctype": "Payment Request",
+				"reference_docname": self.name,
+				"payer_email": self.email_to or frappe.session.user,
+				"payer_name": frappe.safe_encode(data.customer_name),
+				"order_id": self.name,
+				"currency": self.currency,
+			}
+		)
+
+	def create_payment_entry(self, submit=True):
+		super().create_payment_entry()
+		
+		"""create entry"""
+		frappe.flags.ignore_account_permission = True
+
+		ref_doc = frappe.get_doc(self.reference_doctype, self.reference_name)
+
+		if self.reference_doctype in ["Sales Invoice", "POS Invoice"]:
+			party_account = ref_doc.debit_to
+		elif self.reference_doctype == "Purchase Invoice":
+			party_account = ref_doc.credit_to
+		else:
+			party_account = get_party_account("Customer", ref_doc.get("customer"), ref_doc.company)
+
+		party_account_currency = ref_doc.get("party_account_currency") or get_account_currency(
+			party_account
+		)
+
+		bank_amount = self.grand_total
+		if (
+			party_account_currency == ref_doc.company_currency and party_account_currency != self.currency
+		):
+			party_amount = ref_doc.base_grand_total
+		else:
+			party_amount = self.grand_total
+
+		payment_entry = get_payment_entry(
+			self.reference_doctype,
+			self.reference_name,
+			party_amount=party_amount,
+			bank_account=self.payment_account,
+			bank_amount=bank_amount,
+		)
+
+		payment_entry.update(
+			{
+				"reference_no": self.name,
+				"reference_date": nowdate(),
+				"remarks": "Payment Entry against {0} {1} via Payment Request {2}".format(
+					self.reference_doctype, self.reference_name, self.name
+				),
+			}
+		)
+
+		if payment_entry.difference_amount:
+			company_details = get_company_defaults(ref_doc.company)
+
+			payment_entry.append(
+				"deductions",
+				{
+					"account": company_details.exchange_gain_loss_account,
+					"cost_center": company_details.cost_center,
+					"amount": payment_entry.difference_amount,
+				},
+			)
+
+		if submit:
+			payment_entry.insert(ignore_permissions=True)
+			payment_entry.submit()
+
+		return payment_entry
+
+class CustomPaymentEntry(PaymentEntry):
+    
+	def set_missing_values(self):
+		super().set_missing_values()
+		if self.payment_type == "Internal Transfer":
+			for field in (
+				"party",
+				"party_balance",
+				"total_allocated_amount",
+				"base_total_allocated_amount",
+				"unallocated_amount",
+			):
+				self.set(field, None)
+			self.references = []
+		else:
+			if not self.party_type:
+				frappe.throw(_("Party Type is mandatory"))
+
+			if not self.party:
+				frappe.throw(_("Party is mandatory"))
+
+			_party_name = (
+				"title" if self.party_type in ("Student", "Student Applicant","Shareholder") else self.party_type.lower() + "_name"
+			)
+			
+			self.party_name = frappe.db.get_value(self.party_type, self.party, _party_name)
+			
+		if self.party:
+			if not self.party_balance:
+				self.party_balance = get_balance_on(
+					party_type=self.party_type, party=self.party, date=self.posting_date, company=self.company
+				)
+
+			if not self.party_account:
+				party_account = get_party_account(self.party_type, self.party, self.company)
+				self.set(self.party_account_field, party_account)
+				self.party_account = party_account
+
+		if self.paid_from and not (self.paid_from_account_currency or self.paid_from_account_balance):
+			acc = get_account_details(self.paid_from, self.posting_date, self.cost_center)
+			self.paid_from_account_currency = acc.account_currency
+			self.paid_from_account_balance = acc.account_balance
+
+		if self.paid_to and not (self.paid_to_account_currency or self.paid_to_account_balance):
+			acc = get_account_details(self.paid_to, self.posting_date, self.cost_center)
+			self.paid_to_account_currency = acc.account_currency
+			self.paid_to_account_balance = acc.account_balance
+
+		self.party_account_currency = (
+			self.paid_from_account_currency
+			if self.payment_type == "Receive"
+			else self.paid_to_account_currency
+		)
+
+		self.set_missing_ref_details()
+
+	def validate_reference_documents(self):
+		super().validate_reference_documents()
+		if self.party_type == "Student":
+			valid_reference_doctypes = "Fees"
+		if self.party_type == "Student Applicant":
+			valid_reference_doctypes = "Fees"
+		elif self.party_type == "Customer":
+			valid_reference_doctypes = ("Sales Order", "Sales Invoice", "Journal Entry", "Dunning")
+		elif self.party_type == "Supplier":
+			valid_reference_doctypes = ("Purchase Order", "Purchase Invoice", "Journal Entry")
+		elif self.party_type == "Employee":
+			valid_reference_doctypes = ("Expense Claim", "Journal Entry", "Employee Advance", "Gratuity")
+		elif self.party_type == "Shareholder":
+			valid_reference_doctypes = "Journal Entry"
+		elif self.party_type == "Donor":
+			valid_reference_doctypes = "Donation"
+
+		for d in self.get("references"):
+			if not d.allocated_amount:
+				continue
+			
+			if d.reference_doctype not in valid_reference_doctypes:
+				frappe.throw(
+					_("Reference Doctype must be one of {0}").format(comma_or(valid_reference_doctypes))
+				)
+
+			elif d.reference_name:
+				if not frappe.db.exists(d.reference_doctype, d.reference_name):
+					frappe.throw(_("{0} {1} does not exist").format(d.reference_doctype, d.reference_name))
+				else:
+					ref_doc = frappe.get_doc(d.reference_doctype, d.reference_name)
+
+					if d.reference_doctype != "Journal Entry":
+						if self.party != ref_doc.get(scrub(self.party_type)):
+							if self.party_type == 'Student Applicant':
+								pass
+							else:
+								frappe.throw(
+									_("{0} {1} is not associated with {2} {3}").format(
+										d.reference_doctype, d.reference_name, self.party_type, self.party
+									)
+								)
+					else:
+						self.validate_journal_entry()
+
+					if d.reference_doctype in ("Sales Invoice", "Purchase Invoice", "Expense Claim", "Fees"):
+						if self.party_type == "Customer":
+							ref_party_account = (
+								get_party_account_based_on_invoice_discounting(d.reference_name) or ref_doc.debit_to
+							)
+						elif self.party_type == "Student" or "Student Applicant":
+							ref_party_account = ref_doc.receivable_account
+						elif self.party_type == "Supplier":
+							ref_party_account = ref_doc.credit_to
+						elif self.party_type == "Employee":
+							ref_party_account = ref_doc.payable_account
+
+						if ref_party_account != self.party_account:
+							frappe.throw(
+								_("{0} {1} is associated with {2}, but Party Account is {3}").format(
+									d.reference_doctype, d.reference_name, ref_party_account, self.party_account
+								)
+							)
+
+					if ref_doc.docstatus != 1:
+						frappe.throw(_("{0} {1} must be submitted").format(d.reference_doctype, d.reference_name))
+
+
+class CustomWebForm(WebForm):
+    
+	def get_payment_gateway_url(self, doc):
+		super().get_payment_gateway_url(doc)
+		if self.accept_payment:
+			controller = get_payment_gateway_controller(self.payment_gateway)
+
+			title = "Payment for {0} {1}".format(doc.doctype, doc.name)
+			name = doc.name
+			amount = self.amount
+			if frappe.session.user == "Guest" or "Administrator":
+				email = doc.student_email_id or doc.student_email
+				
+			else:
+				email = frappe.session.user
+			
+			if not doc.middle_name:
+				doc.middle_name = ''
+			if not doc.last_name:
+				doc.last_name = ''
+			if not doc.middle_name and doc.last_name:
+				fullname = doc.first_name
+			else:
+				fullname = doc.first_name + ' ' + doc.middle_name + ' ' + doc.last_name
+
+			if self.amount_based_on_field:
+				amount = doc.get(self.amount_field)
+
+			from decimal import Decimal
+			if amount is None or Decimal(amount) <= 0:
+				return frappe.utils.get_url(self.success_url or self.route)
+
+
+			reference_doctype = "Web Form"
+			reference_docname = self.name
+			# get_doctype for the web_form
+			if self.doc_type == "Student Applicant":
+				# create a fees scheudle for the student, which will be used as reference in the integration request
+				reference_doctype = self.doc_type
+				reference_docname = doc.name
+			payment_details = {
+				"amount": amount,
+				"title": title,
+				"description": title,
+				"docname":name,
+				"reference_doctype": reference_doctype,
+				"reference_docname": reference_docname,
+				"payer_email": email,
+				"payer_name": fullname,
+				"order_id": doc.name,
+				"currency": self.currency,
+				"redirect_to": frappe.utils.get_url(self.success_url or self.route)
+			}
+			
+			# Redirect the user to this url
+			return controller.get_payment_url(**payment_details)
+
+
+
 def split_invoices_based_on_payment_terms(outstanding_invoices):
 	invoice_ref_based_on_payment_terms = {}
 	for idx, d in enumerate(outstanding_invoices):
@@ -70,134 +399,48 @@ def split_invoices_based_on_payment_terms(outstanding_invoices):
 	return outstanding_invoices_after_split
 
 
-from frappe.utils import cint, comma_or, flt, getdate, nowdate
-from erpnext.accounts.doctype.bank_account.bank_account import (
-	get_bank_account_details,
-	get_party_bank_account,
-)
-from erpnext.accounts.doctype.invoice_discounting.invoice_discounting import (
-	get_party_account_based_on_invoice_discounting,
-)
-from erpnext.accounts.doctype.journal_entry.journal_entry import get_default_bank_cash_account
+def make_gl_entries(doc):
+	
+	if not doc.grand_total:
+		return
+	party_type = doc.fee_document_type
+	student_gl_entries = doc.get_gl_dict(
+		{
+			"account": doc.receivable_account,
+			"party_type": doc.fee_document_type,
+			"party": doc.student,
+			"against": doc.income_account,
+			"debit": doc.grand_total,
+			"debit_in_account_currency": doc.grand_total,
+			"against_voucher": doc.name,
+			"against_voucher_type": doc.doctype,
+		},
+		item=doc,
+	)
 
-from erpnext.accounts.party import get_party_account
-from erpnext.accounts.utils import get_account_currency, get_balance_on, get_outstanding_invoices
-from functools import reduce
-from erpnext.accounts.doctype.payment_entry.payment_entry import (
-	get_company_defaults,get_account_details
-)
+	fee_gl_entry = doc.get_gl_dict(
+		{
+			"account": doc.income_account,
+			"against": doc.student,
+			"credit": doc.grand_total,
+			"credit_in_account_currency": doc.grand_total,
+			"cost_center": doc.cost_center,
+		},
+		item=doc,
+	)
+	frappe.log_error(fee_gl_entry,'fee_gl_entry')
+	from erpnext.accounts.general_ledger import make_gl_entries as mk_gl_entries
 
-def get_payment_gateway_url(self, doc):
-	if self.accept_payment:
-		controller = get_payment_gateway_controller(self.payment_gateway)
-
-		title = "Payment for {0} {1}".format(doc.doctype, doc.name)
-		name = doc.name
-		amount = self.amount
-		if frappe.session.user == "Guest" or "Administrator":
-			email = doc.student_email_id or doc.student_email
-			
-		else:
-			email = frappe.session.user
-		
-		if not doc.middle_name:
-			doc.middle_name = ''
-		if not doc.last_name:
-			doc.last_name = ''
-		if not doc.middle_name and doc.last_name:
-			fullname = doc.first_name
-		else:
-			fullname = doc.first_name + ' ' + doc.middle_name + ' ' + doc.last_name
-
-		if self.amount_based_on_field:
-			amount = doc.get(self.amount_field)
-
-		from decimal import Decimal
-		if amount is None or Decimal(amount) <= 0:
-			return frappe.utils.get_url(self.success_url or self.route)
-
-
-		reference_doctype = "Web Form"
-		reference_docname = self.name
-		# get_doctype for the web_form
-		if self.doc_type == "Student Applicant":
-			# create a fees scheudle for the student, which will be used as reference in the integration request
-			reference_doctype = self.doc_type
-			reference_docname = doc.name
-		payment_details = {
-			"amount": amount,
-			"title": title,
-			"description": title,
-			"docname":name,
-			"reference_doctype": reference_doctype,
-			"reference_docname": reference_docname,
-			"payer_email": email,
-			"payer_name": fullname,
-			"order_id": doc.name,
-			"currency": self.currency,
-			"redirect_to": frappe.utils.get_url(self.success_url or self.route)
-		}
-		
-		# Redirect the user to this url
-		return controller.get_payment_url(**payment_details)
+	mk_gl_entries(
+		[student_gl_entries, fee_gl_entry],
+		cancel=(doc.docstatus == 2),
+		update_outstanding="Yes",
+		merge_entries=False,
+	)
 
 
 
 
-def on_submit(self):
-
-    self.make_gl_entries()
-
-    if self.send_payment_request and self.student_email:
-        party_type = self.fee_document_type
-        pr = make_payment_request(
-            party_type=party_type,
-            party=self.student,
-            dt="Fees",
-            dn=self.name,
-            recipient_id=self.student_email,
-            submit_doc=True,
-            use_dummy_message=True,
-        )
-        frappe.msgprint(_("Payment request {0} created").format(getlink("Payment Request", pr.name)))
-
-def make_gl_entries(self):
-    if not self.grand_total:
-        return
-    party_type = self.fee_document_type
-    student_gl_entries = self.get_gl_dict(
-        {
-            "account": self.receivable_account,
-            "party_type": party_type,
-            "party": self.student,
-            "against": self.income_account,
-            "debit": self.grand_total,
-            "debit_in_account_currency": self.grand_total,
-            "against_voucher": self.name,
-            "against_voucher_type": self.doctype,
-        },
-        item=self,
-    )
-
-    fee_gl_entry = self.get_gl_dict(
-        {
-            "account": self.income_account,
-            "against": self.student,
-            "credit": self.grand_total,
-            "credit_in_account_currency": self.grand_total,
-            "cost_center": self.cost_center,
-        },
-        item=self,
-    )
-
-    from erpnext.accounts.general_ledger import make_gl_entries
-
-    make_gl_entries(
-        [student_gl_entries, fee_gl_entry],
-        cancel=(self.docstatus == 2),
-        update_outstanding="Yes",
-        merge_entries=False,
-    )
 
 
 def get_payment_entry(dt, dn, party_amount=None, bank_account=None, bank_amount=None):
@@ -608,188 +851,7 @@ def get_bank_cash_account(doc, bank_account):
 	return bank
 
 
-def create_payment_entry(self, submit=True):
-    
-    """create entry"""
-    frappe.flags.ignore_account_permission = True
 
-    ref_doc = frappe.get_doc(self.reference_doctype, self.reference_name)
-
-    if self.reference_doctype in ["Sales Invoice", "POS Invoice"]:
-        party_account = ref_doc.debit_to
-    elif self.reference_doctype == "Purchase Invoice":
-        party_account = ref_doc.credit_to
-    else:
-        party_account = get_party_account("Customer", ref_doc.get("customer"), ref_doc.company)
-
-    party_account_currency = ref_doc.get("party_account_currency") or get_account_currency(
-        party_account
-    )
-
-    bank_amount = self.grand_total
-    if (
-        party_account_currency == ref_doc.company_currency and party_account_currency != self.currency
-    ):
-        party_amount = ref_doc.base_grand_total
-    else:
-        party_amount = self.grand_total
-
-    payment_entry = get_payment_entry(
-        self.reference_doctype,
-        self.reference_name,
-        party_amount=party_amount,
-        bank_account=self.payment_account,
-        bank_amount=bank_amount,
-    )
-
-    payment_entry.update(
-        {
-            "reference_no": self.name,
-            "reference_date": nowdate(),
-            "remarks": "Payment Entry against {0} {1} via Payment Request {2}".format(
-                self.reference_doctype, self.reference_name, self.name
-            ),
-        }
-    )
-
-    if payment_entry.difference_amount:
-        company_details = get_company_defaults(ref_doc.company)
-
-        payment_entry.append(
-            "deductions",
-            {
-                "account": company_details.exchange_gain_loss_account,
-                "cost_center": company_details.cost_center,
-                "amount": payment_entry.difference_amount,
-            },
-        )
-
-    if submit:
-        payment_entry.insert(ignore_permissions=True)
-        payment_entry.submit()
-
-    return payment_entry
-
-def set_missing_values(self):
-    if self.payment_type == "Internal Transfer":
-        for field in (
-            "party",
-            "party_balance",
-            "total_allocated_amount",
-            "base_total_allocated_amount",
-            "unallocated_amount",
-        ):
-            self.set(field, None)
-        self.references = []
-    else:
-        if not self.party_type:
-            frappe.throw(_("Party Type is mandatory"))
-
-        if not self.party:
-            frappe.throw(_("Party is mandatory"))
-
-        _party_name = (
-            "title" if self.party_type in ("Student", "Student Applicant","Shareholder") else self.party_type.lower() + "_name"
-        )
-        
-        self.party_name = frappe.db.get_value(self.party_type, self.party, _party_name)
-        
-    if self.party:
-        if not self.party_balance:
-            self.party_balance = get_balance_on(
-                party_type=self.party_type, party=self.party, date=self.posting_date, company=self.company
-            )
-
-        if not self.party_account:
-            party_account = get_party_account(self.party_type, self.party, self.company)
-            self.set(self.party_account_field, party_account)
-            self.party_account = party_account
-
-    if self.paid_from and not (self.paid_from_account_currency or self.paid_from_account_balance):
-        acc = get_account_details(self.paid_from, self.posting_date, self.cost_center)
-        self.paid_from_account_currency = acc.account_currency
-        self.paid_from_account_balance = acc.account_balance
-
-    if self.paid_to and not (self.paid_to_account_currency or self.paid_to_account_balance):
-        acc = get_account_details(self.paid_to, self.posting_date, self.cost_center)
-        self.paid_to_account_currency = acc.account_currency
-        self.paid_to_account_balance = acc.account_balance
-
-    self.party_account_currency = (
-        self.paid_from_account_currency
-        if self.payment_type == "Receive"
-        else self.paid_to_account_currency
-    )
-
-    self.set_missing_ref_details()
-
-
-def validate_reference_documents(self):
-	
-	if self.party_type == "Student":
-		valid_reference_doctypes = "Fees"
-	if self.party_type == "Student Applicant":
-		valid_reference_doctypes = "Fees"
-	elif self.party_type == "Customer":
-		valid_reference_doctypes = ("Sales Order", "Sales Invoice", "Journal Entry", "Dunning")
-	elif self.party_type == "Supplier":
-		valid_reference_doctypes = ("Purchase Order", "Purchase Invoice", "Journal Entry")
-	elif self.party_type == "Employee":
-		valid_reference_doctypes = ("Expense Claim", "Journal Entry", "Employee Advance", "Gratuity")
-	elif self.party_type == "Shareholder":
-		valid_reference_doctypes = "Journal Entry"
-	elif self.party_type == "Donor":
-		valid_reference_doctypes = "Donation"
-
-	for d in self.get("references"):
-		if not d.allocated_amount:
-			continue
-		
-		if d.reference_doctype not in valid_reference_doctypes:
-			frappe.throw(
-				_("Reference Doctype must be one of {0}").format(comma_or(valid_reference_doctypes))
-			)
-
-		elif d.reference_name:
-			if not frappe.db.exists(d.reference_doctype, d.reference_name):
-				frappe.throw(_("{0} {1} does not exist").format(d.reference_doctype, d.reference_name))
-			else:
-				ref_doc = frappe.get_doc(d.reference_doctype, d.reference_name)
-
-				if d.reference_doctype != "Journal Entry":
-					if self.party != ref_doc.get(scrub(self.party_type)):
-						if self.party_type == 'Student Applicant':
-							pass
-						else:
-							frappe.throw(
-								_("{0} {1} is not associated with {2} {3}").format(
-									d.reference_doctype, d.reference_name, self.party_type, self.party
-								)
-							)
-				else:
-					self.validate_journal_entry()
-
-				if d.reference_doctype in ("Sales Invoice", "Purchase Invoice", "Expense Claim", "Fees"):
-					if self.party_type == "Customer":
-						ref_party_account = (
-							get_party_account_based_on_invoice_discounting(d.reference_name) or ref_doc.debit_to
-						)
-					elif self.party_type == "Student" or "Student Applicant":
-						ref_party_account = ref_doc.receivable_account
-					elif self.party_type == "Supplier":
-						ref_party_account = ref_doc.credit_to
-					elif self.party_type == "Employee":
-						ref_party_account = ref_doc.payable_account
-
-					if ref_party_account != self.party_account:
-						frappe.throw(
-							_("{0} {1} is associated with {2}, but Party Account is {3}").format(
-								d.reference_doctype, d.reference_name, ref_party_account, self.party_account
-							)
-						)
-
-				if ref_doc.docstatus != 1:
-					frappe.throw(_("{0} {1} must be submitted").format(d.reference_doctype, d.reference_name))
 
 
 

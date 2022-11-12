@@ -87,9 +87,12 @@ after_install = "paystack_school.install.after_install"
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+override_doctype_class = {
+	"Web Form":"paystack_school.overrides.CustomWebForm",
+	"Payment Request":"paystack_school.overrides.CustomPaymentRequest",
+	"Payment Entry":"paystack_school.overrides.CustomPaymentEntry",
+	"Fees":"paystack_school.overrides.CustomFees"
+}
 
 # Document Events
 # ---------------
@@ -132,9 +135,10 @@ after_install = "paystack_school.install.after_install"
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "paystack_school.event.get_events"
-# }
+override_whitelisted_methods = {
+	"erpnext.accounts.doctype.payment_entry.payment_entry.get_outstanding_on_journal_entry":"paystack_school.overrides.get_outstanding_on_journal_entry"
+	"erpnext.accounts.doctype.payment_entry.payment_entry.get_party_details = paystack_school.overrides.get_party_details"
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
