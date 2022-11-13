@@ -38,8 +38,7 @@ class CustomFees(Fees):
     
 	
 	def on_submit(self):
-		frappe.log_error('on_submit',">>>>>>>>")
-		make_gl_entries(self)
+		make_gledger_entries(self)
 
 		if self.send_payment_request and self.student_email:
 			party_type = self.fee_document_type
@@ -58,7 +57,7 @@ class CustomFees(Fees):
 class CustomPaymentRequest(PaymentRequest):
     
 	def get_payment_url(self):
-		super().get_payment_url()
+		
 			# check if payment url/integration request already exists
 		integration_request = frappe.db.exists('Integration Request',{'reference_doctype':self.party_type,'reference_docname':self.party})
 		if integration_request:
@@ -96,7 +95,7 @@ class CustomPaymentRequest(PaymentRequest):
 		)
 
 	def create_payment_entry(self, submit=True):
-		super().create_payment_entry()
+		
 		
 		"""create entry"""
 		frappe.flags.ignore_account_permission = True
@@ -113,8 +112,8 @@ class CustomPaymentRequest(PaymentRequest):
 		party_account_currency = ref_doc.get("party_account_currency") or get_account_currency(
 			party_account
 		)
-
 		bank_amount = self.grand_total
+		
 		if (
 			party_account_currency == ref_doc.company_currency and party_account_currency != self.currency
 		):
@@ -161,7 +160,7 @@ class CustomPaymentRequest(PaymentRequest):
 class CustomPaymentEntry(PaymentEntry):
     
 	def set_missing_values(self):
-		super().set_missing_values()
+		
 		if self.payment_type == "Internal Transfer":
 			for field in (
 				"party",
@@ -215,7 +214,7 @@ class CustomPaymentEntry(PaymentEntry):
 		self.set_missing_ref_details()
 
 	def validate_reference_documents(self):
-		super().validate_reference_documents()
+		
 		if self.party_type == "Student":
 			valid_reference_doctypes = "Fees"
 		if self.party_type == "Student Applicant":
@@ -399,7 +398,7 @@ def split_invoices_based_on_payment_terms(outstanding_invoices):
 	return outstanding_invoices_after_split
 
 
-def make_gl_entries(doc):
+def make_gledger_entries(doc):
 	
 	if not doc.grand_total:
 		return
@@ -428,7 +427,7 @@ def make_gl_entries(doc):
 		},
 		item=doc,
 	)
-	frappe.log_error(fee_gl_entry,'fee_gl_entry')
+	
 	from erpnext.accounts.general_ledger import make_gl_entries as mk_gl_entries
 
 	mk_gl_entries(
@@ -442,7 +441,7 @@ def make_gl_entries(doc):
 
 
 
-
+@frappe.whitelist()
 def get_payment_entry(dt, dn, party_amount=None, bank_account=None, bank_amount=None):
     reference_doc = None
     doc = frappe.get_doc(dt, dn)
@@ -456,7 +455,6 @@ def get_payment_entry(dt, dn, party_amount=None, bank_account=None, bank_amount=
     grand_total, outstanding_amount = set_grand_total_and_outstanding_amount(
     party_amount, dt, party_account_currency, doc
     )
-
     # bank or cash
     bank = get_bank_cash_account(doc, bank_account)
 
@@ -558,9 +556,12 @@ def get_payment_entry(dt, dn, party_amount=None, bank_account=None, bank_amount=
 						"allocated_amount": outstanding_amount,
 					},
 				)
-
+    
+	
     pe.setup_party_account_field()
     pe.set_missing_values()
+    
+    
 
     if party_account and bank:
         if dt == "Employee Advance":

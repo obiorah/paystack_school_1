@@ -109,7 +109,6 @@ def verify_transaction(payload):
         url = f"https://api.paystack.co/transaction/verify/{payload.get('reference')}"
         res = requests.get(url, headers=headers, timeout=60)
         resjson = res.json()
-        
         if(res.status_code == 200):
             status = resjson.get('data').get('status')
             amount = resjson.get('data').get('amount')
@@ -136,7 +135,9 @@ def verify_transaction(payload):
             else:
                 frappe.log_error(json.dumps(resjson.get('data')),'Payment Verification Failed')
                 return
-        return 'verification failed'
+        else:
+            frappe.log_erorr(res.text,'verification failure')
+            return False
     #
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), 'Paystack Payment Verification Failure')

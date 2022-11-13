@@ -44,7 +44,7 @@ Vue.createApp({
             </div>
           </div>
 
-          <button class="btn btn-primary btn-lg btn-block" type="button"
+          <button class="btn btn-primary btn-lg btn-block pay_now" type="button"
           id="paynow" @click="open_paystack">Pay Now</button>
         </form>
       </div>
@@ -112,6 +112,7 @@ Vue.createApp({
       //alert('error', 'Invalid', 'Your payment request is invalid!__2');
     },
     open_paystack(){
+      $('.pay_now').prop('disabled',true)
       frappe.call({
         method: "paystack_school.api.v1.get_payment_request",
         type: "POST",
